@@ -1,0 +1,166 @@
+// This file is part of www.nand2tetris.org
+// and the book "The Elements of Computing Systems"
+// by Nisan and Schocken, MIT Press.
+// File name: projects/05/CPU.hdl
+
+/**
+ * The Hack CPU (Central Processing unit), consisting of an ALU,
+ * two registers named A and D, and a program counter named PC.
+ * The CPU is designed to fetch and execute instructions written in 
+ * the Hack machine language. In particular, functions as follows:
+ * Executes the inputted instruction according to the Hack machine 
+ * language specification. The D and A in the language specification
+ * refer to CPU-resident registers, while M refers to the external
+ * memory location addressed by A, i.e. to Memory[A]. The inM input 
+ * holds the value of this location. If the current instruction needs 
+ * to write a value to M, the value is placed in outM, the address 
+ * of the target location is placed in the addressM output, and the 
+ * writeM control bit is asserted. (When writeM==0, any value may 
+ * appear in outM). The outM and writeM outputs are combinational: 
+ * they are affected instantaneously by the execution of the current 
+ * instruction. The addressM and pc outputs are clocked: although they 
+ * are affected by the execution of the current instruction, they commit 
+ * to their new values only in the next time step. If reset==1 then the 
+ * CPU jumps to address 0 (i.e. pc is set to 0 in next time step) rather 
+ * than to the address resulting from executing the current instruction. 
+ */
+
+CHIP CPU {
+
+    IN  inM[16],         // M value input  (M = contents of RAM[A]) (FROM RAM)
+        instruction[16], // Instruction for execution
+        reset;           // Signals whether to re-start the current
+                         // program (reset==1) or continue executing
+                         // the current program (reset==0).
+
+    OUT outM[16],        // M value output
+        writeM,          // Write to M? 
+        addressM[15],    // Address in data memory (of M)
+        pc[15];          // address of next instruction
+
+    PARTS:
+    // Put your code here:
+
+    // 1, 1, 1, a, c1, c2, c3, c4, c5, c6, d1, d2, d3, j1, j2, j3, 
+    // |  |     |                           |           |_ jump bits
+    // |  |     |                           |_____________ destination bits
+    // |  |     |_________________________________________ comp bits
+    // |  |_______________________________________________ not used
+    // |__________________________________________________ opcode
+
+
+
+
+
+    //------------
+    //if it's a A-instruction the input comes from the instruction[16]
+    // however if it's a C instruction the input comes from the ALU's output
+    
+    Not(in=instruction[15] , out=instructionSelect);
+    Mux16(a=ALUoutM , b=instruction , sel=instructionSelect , out=muxAout);
+    //------------
+
+
+    //------------
+    //instruction[5] = d1 and refers if the destination is the A register, so in this case we are looking to know if :
+    //   it's a A-Instruction and therefore register A should receive the value of the instruction
+    //   or if it's a C-instruction, where A-Register is the destination
+
+    Or(a=instructionSelect,b=instruction[5],out=CInstructionIntoA); 
+    ARegister( in=muxAout , load=CInstructionIntoA , out=regAout , out[0..14]=addressM );
+    //------------
+
+
+    //------------
+    // instruction[15] is the opcode, instruction[12] is comp bit 'a'
+    //   when comp bit 'a' == 1 the instruction will perform a calculation with data coming from the memory
+    //   so we check if it's a C instruction and the comp bit 'a' are all 1, meaning we should allow the data from memory
+    //   to be selected as output from MUX
+
+    And(a=instruction[15],b=instruction[12],out=SelAorMout);
+    Mux16(a=regAout,b=inM,sel=SelAorMout,out=ARegOrMem);
+    //------------
+
+
+    //------------
+    // D-Register is fed with instructions coming from the ALU
+    //   so in this case we need to be sure it's a C instruction (instruction[15] == opcode == 1)
+    //   also it needs to be instruction[4] == d2 == 1 , when the destination bit d2 is set on (1) the destination refers to
+    //     the register D
+    //   To summarize, we need to verify that it's a C instruction, with D-Register as a destination, therefore:
+    //     instruction[15] == 1 AND instruction[4] == 1
+
+    And(a=instruction[15],b=instruction[4],out=loadDregister);
+    DRegister(in=ALUoutM,load=loadDregister,out=regDout);
+    //------------
+
+    //------------
+    //write to memory, instruction[15] == opcode == 1 -> C-Instruction
+    //   instruction[3] == d3 == memory as destination
+    // so if it's a C-instruction and the destination is set to be written in memory
+    And(a=instruction[15],b=instruction[3],out=writeM);
+    //------------    
+
+
+    //------------
+    //CHIP ALU {
+    //    IN  
+    //        x[16],  // 16-bit inputs ---------> D-Register    
+    //        y[16],  // 16-bit inputs ---------> A-Register or Memory
+    //        zx, // zero the x input? ------------------------------> c1 == instruction[11]
+    //        nx, // negate the x input? ----------------------------> c2 == instruction[10]
+    //        zy, // zero the y input? ------------------------------> c3 == instruction[9]
+    //        ny, // negate the y input? ----------------------------> c4 == instruction[8]
+    //        f,  // compute out = x + y (if 1) or x & y (if 0) -----> c5 == instruction[7]
+    //        no; // negate the out output? -------------------------> c6 == instruction[6]
+    //
+    //    OUT 
+    //        out[16], // 16-bit output
+    //        zr, // zero output flag, 1 if (out == 0), 0 otherwise - is the output zero? if yes then zr =1
+    //        ng; // negative output flag, 1 if (out < 0),  0 otherwise - is the output negative? if yes then ng = 1
+
+    // although not clearly stated in the material the order in whic the control bits is provided is the exact
+    //  same order needed for the ALU, it's possible to check on Chapter 2 presentation slide 49
+
+
+    ALU(x=regDout,y=ARegOrMem,  zx=instruction[11],nx=instruction[10],zy=instruction[9],ny=instruction[8],f=instruction[7],no=instruction[6],  out=ALUoutM,out=outM,zr=zr,ng=ng);
+    //------------
+
+
+    //------------
+    // dealing with jump conditions
+
+    Not(in=ng,out=positive); //setting the variables accordingly
+    Not(in=zr,out=notZero);
+    And(a=positive,b=notZero,out=positiveNotZero); // at this point we know the result is a positive number
+
+
+    // if it's a C-Instruction and J3 is 1 (JGT, JGE, JNE, JMP)
+    And(a=instruction[15],b=instruction[0],out=J3selected);
+
+    // if it's a C-Instruction and J2 is 1 (JEQ, JGE, JLE, JMP)
+    And(a=instruction[15],b=instruction[1],out=J2selected);    
+
+    // if it's a C-Instruction and J1 is 1 (JLT, JNE, JLE, JMP)
+    And(a=instruction[15],b=instruction[2],out=J1selected);
+
+    // with the flags in place and with the jump instructions selected, we check for results
+    And( a=J3selected , b=positiveNotZero, out=writePCJ3 ); //JGT, JNE, JMP
+    And( a=J2selected , b=zr             , out=writePCJ2 ); //JEQ, JGE, JLE, JMP
+    And( a=J1selected , b=ng             , out=writePCJ1 ); //JLT, JNE, JMP
+
+
+    //defines if PC-register will jump / receive the value from A-Register
+    Or(a=writePCJ3,b=writePCJ2,out=writePCJ3J2);
+    Or(a=writePCJ3J2,b=writePCJ1,out=writeOnPCreg);
+    //------------
+
+
+    //------------
+    PC(in=regAout,load=writeOnPCreg,inc=true,reset=reset,out[0..14]=pc);
+    //------------
+
+
+
+
+}
